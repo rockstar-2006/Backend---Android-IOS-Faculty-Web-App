@@ -29,18 +29,34 @@ router.post('/upload', protect, async (req, res) => {
   console.log('POST /upload called with data count:', req.body.students?.length);
   try {
     const { students } = req.body;
-    
+
     if (!students || !Array.isArray(students)) {
       return res.status(400).json({ message: 'Invalid students data' });
     }
-    
-    const studentsWithUser = students.map(student => ({
-      ...student,
-      userId: req.user._id
+
+    // Use bulkWrite for high-speed upserts (Update or Insert)
+    const operations = students.map(student => ({
+      updateOne: {
+        filter: {
+          usn: student.usn,
+          userId: req.user._id
+        },
+        update: {
+          $set: {
+            name: student.name,
+            email: student.email,
+            branch: student.branch,
+            year: student.year,
+            semester: student.semester,
+            userId: req.user._id
+          }
+        },
+        upsert: true
+      }
     }));
 
-    await Student.insertMany(studentsWithUser);
-    
+    await Student.bulkWrite(operations);
+
     res.json({ success: true, count: students.length });
   } catch (error) {
     console.error('Error uploading students:', error);
@@ -53,11 +69,11 @@ router.post('/add', protect, async (req, res) => {
   console.log('POST /add called with:', req.body);
   try {
     const { name, usn, email, branch, year, semester } = req.body;
-    
+
     // Validate required fields
     if (!name || !usn || !email || !branch || !year || !semester) {
-      return res.status(400).json({ 
-        message: 'All fields are required: name, usn, email, branch, year, semester' 
+      return res.status(400).json({
+        message: 'All fields are required: name, usn, email, branch, year, semester'
       });
     }
 
@@ -70,10 +86,10 @@ router.post('/add', protect, async (req, res) => {
     });
 
     if (existingStudent) {
-      return res.status(400).json({ 
-        message: existingStudent.usn === usn 
-          ? 'Student with this USN already exists' 
-          : 'Student with this email already exists' 
+      return res.status(400).json({
+        message: existingStudent.usn === usn
+          ? 'Student with this USN already exists'
+          : 'Student with this email already exists'
       });
     }
 
@@ -88,7 +104,7 @@ router.post('/add', protect, async (req, res) => {
     });
 
     await student.save();
-    
+
     console.log('Student created:', student._id);
     res.json({ success: true, student });
   } catch (error) {
@@ -102,7 +118,7 @@ router.put('/:id', protect, async (req, res) => {
   console.log('PUT /:id called for student:', req.params.id, 'data:', req.body);
   try {
     const { name, usn, email, branch, year, semester } = req.body;
-    
+
     // Check if another student with same USN or email exists (excluding current student)
     const existingStudent = await Student.findOne({
       $and: [
@@ -113,10 +129,10 @@ router.put('/:id', protect, async (req, res) => {
     });
 
     if (existingStudent) {
-      return res.status(400).json({ 
-        message: existingStudent.usn === usn 
-          ? 'Another student with this USN already exists' 
-          : 'Another student with this email already exists' 
+      return res.status(400).json({
+        message: existingStudent.usn === usn
+          ? 'Another student with this USN already exists'
+          : 'Another student with this email already exists'
       });
     }
 
@@ -165,11 +181,11 @@ router.delete('/:id', protect, async (req, res) => {
       _id: req.params.id,
       userId: req.user._id
     });
-    
+
     if (!student) {
       return res.status(404).json({ message: 'Student not found' });
     }
-    
+
     res.json({ success: true, message: 'Student deleted' });
   } catch (error) {
     console.error('Error deleting student:', error);
@@ -182,7 +198,7 @@ router.post('/delete-multiple', protect, async (req, res) => {
   console.log('POST /delete-multiple called with IDs:', req.body.studentIds);
   try {
     const { studentIds } = req.body;
-    
+
     if (!studentIds || !Array.isArray(studentIds)) {
       return res.status(400).json({ message: 'Invalid student IDs' });
     }
@@ -192,8 +208,8 @@ router.post('/delete-multiple', protect, async (req, res) => {
       userId: req.user._id
     });
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: `Deleted ${result.deletedCount} students`,
       deletedCount: result.deletedCount
     });
@@ -212,7 +228,7 @@ router.get('/debug/routes', (req, res) => {
       method: Object.keys(r.route.methods)[0],
       fullPath: `/api/students${r.route.path}`
     }));
-  
+
   res.json({
     message: 'Available student routes',
     count: routes.length,
