@@ -96,11 +96,14 @@ const connectDB = async () => {
     const opts = {
       serverSelectionTimeoutMS: 30000,
       socketTimeoutMS: 45000,
+      connectTimeoutMS: 30000,
+      family: 4 // Force IPv4 to prevent connection timeouts on Some Vercel networks
     };
 
     console.log('Connecting to MongoDB...');
     const db = await mongoose.connect(uri, opts);
-    console.log('✅ MongoDB connected');
+    console.log('✅ MongoDB connected successfully to:', db.connection.name);
+
     lastDbError = null;
     cachedDb = db;
     await createIndexes();
