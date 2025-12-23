@@ -104,8 +104,8 @@ const connectDB = async () => {
       serverSelectionTimeoutMS: 30000,
       socketTimeoutMS: 45000,
       connectTimeoutMS: 30000,
-      directConnection: true // Force direct connection to bypass proxy issues
     };
+
 
 
     console.log('Connecting to MongoDB...');
