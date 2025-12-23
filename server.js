@@ -94,7 +94,7 @@ const connectDB = async () => {
 
   try {
     const opts = {
-      serverSelectionTimeoutMS: 5000,
+      serverSelectionTimeoutMS: 30000,
       socketTimeoutMS: 45000,
     };
 
@@ -106,10 +106,11 @@ const connectDB = async () => {
     await createIndexes();
     return db;
   } catch (err) {
-    console.error('❌ MongoDB error:', err);
-    lastDbError = err.message;
+    console.error('❌ MongoDB Connection Error:', err.message);
+    lastDbError = `${err.message} (URI Prefix: ${uri.split(':')[0]})`;
     // Don't throw, let the app stay up but show the error in health check
   }
+
 };
 
 // Start connection but don't block
