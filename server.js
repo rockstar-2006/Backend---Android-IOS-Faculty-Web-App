@@ -92,12 +92,21 @@ const connectDB = async () => {
 
   const uri = (process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/quiz_app').trim();
 
+  // LOGGING FOR DEBUGGING
+  console.log('--- DATABASE CONNECTION ATTEMPT ---');
+  console.log('URI Length:', uri.length);
+  console.log('URI Prefix:', uri.substring(0, 20));
+  console.log('Replica Set:', uri.includes('replicaSet'));
+  console.log('--- END LOGGING ---');
+
   try {
     const opts = {
       serverSelectionTimeoutMS: 30000,
       socketTimeoutMS: 45000,
       connectTimeoutMS: 30000,
+      directConnection: true // Force direct connection to bypass proxy issues
     };
+
 
     console.log('Connecting to MongoDB...');
     const db = await mongoose.connect(uri, opts);
