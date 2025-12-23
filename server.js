@@ -106,12 +106,24 @@ app.use('/api/student', studentAuthQuizRoutes); // This will create /api/student
 
 // Health check
 app.get('/api/health', (req, res) => {
+  const dbStatus = mongoose.connection.readyState;
+  const statusMap = {
+    0: 'disconnected',
+    1: 'connected',
+    2: 'connecting',
+    3: 'disconnecting'
+  };
+
   res.json({
     status: 'OK',
     message: 'Backend reachable',
-    port: process.env.PORT || 3001,
     time: new Date().toISOString(),
-    database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+    database: {
+      status: statusMap[dbStatus] || 'unknown',
+      readyState: dbStatus,
+      envDefined: !!process.env.MONGODB_URI,
+    },
+    vercel: !!process.env.VERCEL
   });
 });
 
@@ -123,17 +135,30 @@ app.get('/', (req, res) => {
         <title>SmartQuiz AI Backend</title>
         <style>
           body { font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f0f2f5; }
-          .card { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
+          .card { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; max-width: 500px; }
           h1 { color: #1a73e8; }
-          p { color: #5f6368; }
-          .status { display: inline-block; padding: 4px 12px; border-radius: 16px; background: #e6f4ea; color: #1e8e3e; font-weight: bold; }
+          p { color: #5f6368; line-height: 1.5; }
+          .status { display: inline-block; padding: 6px 16px; border-radius: 20px; font-weight: bold; margin: 10px 0; }
+          .online { background: #e6f4ea; color: #1e8e3e; }
+          .offline { background: #fce8e6; color: #d93025; }
+          code { background: #f1f3f4; padding: 2px 4px; border-radius: 4px; }
         </style>
       </head>
       <body>
         <div class="card">
           <h1>🚀 SmartQuiz AI Backend</h1>
           <p>The backend is running successfully on Vercel.</p>
-          <div class="status">Status: Online</div>
+          
+          <div class="status ${mongoose.connection.readyState === 1 ? 'online' : 'offline'}">
+            Database: ${mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'}
+          </div>
+
+          ${mongoose.connection.readyState !== 1 ? `
+            <p style="color: #d93025; font-size: 0.9rem;">
+              ⚠️ <strong>Action Required:</strong> Check if <code>MONGODB_URI</code> is set in Vercel.
+            </p>
+          ` : ''}
+          
           <p style="margin-top: 1rem;"><small>API Base: <code>/api</code></small></p>
         </div>
       </body>
@@ -147,39 +172,26 @@ app.get('/api/students/test', (req, res) => {
   console.log('🔵 Student test endpoint called');
   res.json({
     status: 'success',
-    message: 'Student routes are working',
-    endpoints: {
-      getAll: '/api/students/all',
-      addSingle: '/api/students/add',
-      uploadBulk: '/api/students/upload',
-      update: '/api/students/:id',
-      delete: '/api/students/:id'
-    }
+    message: 'Student routes are working'
   });
 });
 
 // Debug endpoint
 app.get('/api/debug', (req, res) => {
-  console.log('🔵 Debug endpoint called from:', req.ip);
   res.json({
     status: 'debug',
     server: {
-      port: process.env.PORT || 3001,
-      nodeVersion: process.version
+      nodeVersion: process.version,
+      vercel: !!process.env.VERCEL
     },
-    client: {
-      ip: req.ip,
-      userAgent: req.headers['user-agent']
-    },
-    database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-    endpoints: {
-      teacherAuth: '/api/auth',
-      studentManagement: '/api/students', // ✅ This is for teacher to manage students
-      studentAuth: '/api/student', // ✅ This is for student login/register
-      studentQuiz: '/api/student/quiz' // ✅ This is for student quiz operations
+    database: {
+      status: mongoose.connection.readyState,
+      isDefined: !!process.env.MONGODB_URI,
+      uriPrefix: process.env.MONGODB_URI ? process.env.MONGODB_URI.split(':')[0] : 'none'
     }
   });
 });
+
 
 // Error handlers
 app.use(notFound);
