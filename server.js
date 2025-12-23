@@ -82,13 +82,19 @@ app.use((req, res, next) => {
 /* =========================
    DATABASE
 ========================= */
+let lastDbError = null;
+
 mongoose
   .connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/quiz_app')
   .then(async () => {
     console.log('✅ MongoDB connected');
+    lastDbError = null;
     await createIndexes();
   })
-  .catch((err) => console.error('❌ MongoDB error:', err));
+  .catch((err) => {
+    console.error('❌ MongoDB error:', err);
+    lastDbError = err.message;
+  });
 
 /* =========================
    ROUTES - WITH CORRECT MOUNTING
@@ -122,10 +128,12 @@ app.get('/api/health', (req, res) => {
       status: statusMap[dbStatus] || 'unknown',
       readyState: dbStatus,
       envDefined: !!process.env.MONGODB_URI,
+      error: lastDbError
     },
     vercel: !!process.env.VERCEL
   });
 });
+
 
 // Root route
 app.get('/', (req, res) => {
