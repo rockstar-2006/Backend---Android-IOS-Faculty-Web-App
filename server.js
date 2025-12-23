@@ -182,7 +182,27 @@ app.get('/api/health', async (req, res) => {
 
 
 // Root route
-app.get('/', (req, res) => {
+app.get('/', async (req, res) => {
+  if (mongoose.connection.readyState !== 1) {
+    try {
+      await connectDB();
+    } catch (e) {
+      // Still show the page with disconnected status
+    }
+  }
+
+  const dbState = mongoose.connection.readyState;
+  let statusClass = 'offline';
+  let statusText = 'Disconnected';
+
+  if (dbState === 1) {
+    statusClass = 'online';
+    statusText = 'Connected';
+  } else if (dbState === 2) {
+    statusClass = 'online'; // Blue or yellow would be better, but staying consistent
+    statusText = 'Connecting...';
+  }
+
   res.send(`
     <html>
       <head>
@@ -192,10 +212,11 @@ app.get('/', (req, res) => {
           .card { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; max-width: 500px; }
           h1 { color: #1a73e8; }
           p { color: #5f6368; line-height: 1.5; }
-          .status { display: inline-block; padding: 6px 16px; border-radius: 20px; font-weight: bold; margin: 10px 0; }
+          .status { display: inline-block; padding: 10px 24px; border-radius: 20px; font-weight: bold; margin: 15px 0; font-size: 1.1rem; }
           .online { background: #e6f4ea; color: #1e8e3e; }
           .offline { background: #fce8e6; color: #d93025; }
           code { background: #f1f3f4; padding: 2px 4px; border-radius: 4px; }
+          .btn { display: inline-block; margin-top: 1rem; color: #1a73e8; text-decoration: none; font-size: 0.9rem; }
         </style>
       </head>
       <body>
@@ -203,22 +224,24 @@ app.get('/', (req, res) => {
           <h1>🚀 SmartQuiz AI Backend</h1>
           <p>The backend is running successfully on Vercel.</p>
           
-          <div class="status ${mongoose.connection.readyState === 1 ? 'online' : 'offline'}">
-            Database: ${mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'}
+          <div class="status ${statusClass}">
+            Database: ${statusText}
           </div>
 
-          ${mongoose.connection.readyState !== 1 ? `
+          ${dbState !== 1 ? `
             <p style="color: #d93025; font-size: 0.9rem;">
-              ⚠️ <strong>Action Required:</strong> Check if <code>MONGODB_URI</code> is set in Vercel.
+              ⚠️ <strong>Database Handshake:</strong> If stuck on connecting, check your MongoDB whitelist or refresh in 10 seconds.
             </p>
           ` : ''}
           
           <p style="margin-top: 1rem;"><small>API Base: <code>/api</code></small></p>
+          <a href="/api/health" class="btn">View JSON Health Check</a>
         </div>
       </body>
     </html>
   `);
 });
+
 
 
 // Test endpoint for students
