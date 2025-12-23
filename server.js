@@ -97,13 +97,11 @@ const connectDB = async () => {
       serverSelectionTimeoutMS: 30000,
       socketTimeoutMS: 45000,
       connectTimeoutMS: 30000,
-      family: 4 // Force IPv4 to prevent connection timeouts on Some Vercel networks
     };
 
     console.log('Connecting to MongoDB...');
     const db = await mongoose.connect(uri, opts);
     console.log('✅ MongoDB connected successfully to:', db.connection.name);
-
     lastDbError = null;
     cachedDb = db;
     await createIndexes();
@@ -111,9 +109,11 @@ const connectDB = async () => {
   } catch (err) {
     console.error('❌ MongoDB Connection Error:', err.message);
     const host = uri.split('@')[1] ? uri.split('@')[1].split('/')[0] : 'unknown';
-    lastDbError = `${err.message} (Cluster: ${host})`;
-    // Don't throw, let the app stay up but show the error in health check
+    const prefix = uri.substring(0, 15);
+    lastDbError = `${err.message} (Cluster: ${host}) (URI Prefix: "${prefix}")`;
+    cachedDb = null;
   }
+
 
 
 };
@@ -137,7 +137,7 @@ app.use('/api/student', studentAuthRoutes); // This will create /api/student/log
 app.use('/api/student', studentAuthQuizRoutes); // This will create /api/student/quiz/*
 
 // Health check
-app.get('/api/health', (req, res) => {
+app.get('/api/health', async (req, res) => {
   const dbStatus = mongoose.connection.readyState;
   const statusMap = {
     0: 'disconnected',
@@ -145,6 +145,15 @@ app.get('/api/health', (req, res) => {
     2: 'connecting',
     3: 'disconnecting'
   };
+
+  let outgoingIp = 'checking...';
+  try {
+    const ipRes = await fetch('https://api.ipify.org?format=json');
+    const ipData = await ipRes.json();
+    outgoingIp = ipData.ip;
+  } catch (e) {
+    outgoingIp = 'failed to detect';
+  }
 
   res.json({
     status: 'OK',
@@ -154,11 +163,16 @@ app.get('/api/health', (req, res) => {
       status: statusMap[dbStatus] || 'unknown',
       readyState: dbStatus,
       envDefined: !!process.env.MONGODB_URI,
+      uriLength: process.env.MONGODB_URI ? process.env.MONGODB_URI.length : 0,
       error: lastDbError
     },
-    vercel: !!process.env.VERCEL
+    network: {
+      outgoingIp: outgoingIp,
+      vercel: !!process.env.VERCEL
+    }
   });
 });
+
 
 
 // Root route
