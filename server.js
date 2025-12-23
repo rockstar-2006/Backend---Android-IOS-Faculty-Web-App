@@ -121,16 +121,22 @@ connectDB().catch(() => { });
    PROTECTION MIDDLEWARE
 ========================= */
 const ensureDb = async (req, res, next) => {
+  // If already connected, move on immediately
+  if (mongoose.connection.readyState === 1) {
+    return next();
+  }
+
   try {
-    if (mongoose.connection.readyState !== 1) {
-      await connectDB();
-    }
+    console.log('⏳ Request queued: Waiting for database connection...');
+    // This will wait for the existing promise or start a new one
+    await connectDB();
     next();
   } catch (err) {
+    console.error('❌ Gatekeeper failed:', err.message);
     res.status(503).json({
       success: false,
       message: 'Server Warming Up',
-      error: 'Establishing secure connection. Please retry in 3 seconds.'
+      error: 'The database is taking a moment to connect. Please refresh in 5 seconds.'
     });
   }
 };
