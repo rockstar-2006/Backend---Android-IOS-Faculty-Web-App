@@ -107,9 +107,11 @@ const connectDB = async () => {
     return db;
   } catch (err) {
     console.error('❌ MongoDB Connection Error:', err.message);
-    lastDbError = `${err.message} (URI Prefix: ${uri.split(':')[0]})`;
+    const host = uri.split('@')[1] ? uri.split('@')[1].split('/')[0] : 'unknown';
+    lastDbError = `${err.message} (Cluster: ${host})`;
     // Don't throw, let the app stay up but show the error in health check
   }
+
 
 };
 
