@@ -26,25 +26,37 @@ const allowedOrigins = [
   'http://localhost:8081',
   'http://localhost',
   'capacitor://localhost',
-  'http://192.168.1.105:5173', // Changed from 192.168.1.100
-  'http://192.168.1.105:8081', // Changed from 192.168.1.100
   'ionic://localhost',
   'http://localhost:3000',
   'http://localhost:4200',
-];
+  process.env.FRONTEND_URL,
+  process.env.CLIENT_URL,
+].filter(Boolean); // Filter out undefined if env vars aren't set
 
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin) || /^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/.test(origin)) {
+      // Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) return callback(null, true);
+
+      const isAllowed = allowedOrigins.some(allowed => {
+        if (!allowed) return false;
+        return origin === allowed || origin.startsWith(allowed);
+      });
+
+      // Allow common local network IPs for development
+      const isLocalIP = /^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/.test(origin);
+
+      if (isAllowed || isLocalIP || allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
+
       console.error('❌ CORS BLOCKED:', origin);
       return callback(new Error('Not allowed by CORS'));
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   })
 );
 
@@ -93,7 +105,6 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'OK',
     message: 'Backend reachable',
-    serverIP: '192.168.1.105', // ← CHANGE THIS to 192.168.1.103
     port: process.env.PORT || 3001,
     time: new Date().toISOString(),
     database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
@@ -122,7 +133,6 @@ app.get('/api/debug', (req, res) => {
   res.json({
     status: 'debug',
     server: {
-      ip: '192.168.1.105',
       port: process.env.PORT || 3001,
       nodeVersion: process.version
     },
@@ -155,10 +165,8 @@ app.listen(PORT, HOST, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`=================================`);
   console.log(`🌐 Local: http://localhost:${PORT}`);
-  // In your console logs, update to show the correct IP:
-  console.log(`📱 Network: http://192.168.1.105:${PORT}`);
-  console.log(`🔧 Health: http://192.168.1.105:${PORT}/api/health`);
-  console.log(`🔧 Debug: http://192.168.1.105:${PORT}/api/debug`);
+  console.log(`🔧 Health: /api/health`);
+  console.log(`🔧 Debug: /api/debug`);
   console.log(`📚 Available routes:`);
   console.log(`   Teacher Auth: /api/auth`);
   console.log(`   Teacher Quiz: /api/quiz`);
