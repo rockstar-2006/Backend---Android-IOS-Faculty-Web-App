@@ -86,49 +86,38 @@ let lastDbError = null;
 let cachedDb = null;
 
 const connectDB = async () => {
-  if (cachedDb && mongoose.connection.readyState === 1) {
-    return cachedDb;
+  if (mongoose.connection.readyState === 1) {
+    return mongoose.connection;
   }
 
-  const uri = (process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/quiz_app').trim();
-
-  // LOGGING FOR DEBUGGING
-  console.log('--- DATABASE CONNECTION ATTEMPT ---');
-  console.log('URI Length:', uri.length);
-  console.log('URI Prefix:', uri.substring(0, 20));
-  console.log('Replica Set:', uri.includes('replicaSet'));
-  console.log('--- END LOGGING ---');
+  const rawUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/quiz_app';
+  const uri = rawUri.trim();
 
   try {
     const opts = {
       serverSelectionTimeoutMS: 30000,
       socketTimeoutMS: 45000,
       connectTimeoutMS: 30000,
+      heartbeatFrequencyMS: 10000,
     };
 
-
-
-    console.log('Connecting to MongoDB...');
-    const db = await mongoose.connect(uri, opts);
-    console.log('✅ MongoDB connected successfully to:', db.connection.name);
+    console.log('Attempting MongoDB connection...');
+    await mongoose.connect(uri, opts);
+    console.log('✅ MongoDB connected');
     lastDbError = null;
-    cachedDb = db;
-    await createIndexes();
-    return db;
+    return mongoose.connection;
   } catch (err) {
     console.error('❌ MongoDB Connection Error:', err.message);
     const host = uri.split('@')[1] ? uri.split('@')[1].split('/')[0] : 'unknown';
-    const prefix = uri.substring(0, 15);
-    lastDbError = `${err.message} (Cluster: ${host}) (URI Prefix: "${prefix}")`;
-    cachedDb = null;
+    lastDbError = `${err.message} (Host: ${host})`;
+    throw err;
   }
-
-
-
 };
 
-// Start connection but don't block
-connectDB();
+
+// Start initial connection
+connectDB().catch(err => console.error('Initial DB connection failed'));
+
 
 
 /* =========================
@@ -147,6 +136,16 @@ app.use('/api/student', studentAuthQuizRoutes); // This will create /api/student
 
 // Health check
 app.get('/api/health', async (req, res) => {
+  let connectionStatus = 'unknown';
+  try {
+    if (mongoose.connection.readyState !== 1) {
+      await connectDB();
+    }
+    connectionStatus = 'connected';
+  } catch (err) {
+    connectionStatus = 'error';
+  }
+
   const dbStatus = mongoose.connection.readyState;
   const statusMap = {
     0: 'disconnected',
@@ -161,26 +160,24 @@ app.get('/api/health', async (req, res) => {
     const ipData = await ipRes.json();
     outgoingIp = ipData.ip;
   } catch (e) {
-    outgoingIp = 'failed to detect';
+    outgoingIp = 'failed';
   }
 
   res.json({
     status: 'OK',
-    message: 'Backend reachable',
-    time: new Date().toISOString(),
+    dbAttempt: connectionStatus,
     database: {
       status: statusMap[dbStatus] || 'unknown',
       readyState: dbStatus,
       envDefined: !!process.env.MONGODB_URI,
-      uriLength: process.env.MONGODB_URI ? process.env.MONGODB_URI.length : 0,
       error: lastDbError
     },
     network: {
-      outgoingIp: outgoingIp,
-      vercel: !!process.env.VERCEL
+      outgoingIp: outgoingIp
     }
   });
 });
+
 
 
 
