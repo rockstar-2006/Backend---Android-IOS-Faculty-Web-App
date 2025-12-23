@@ -83,18 +83,38 @@ app.use((req, res, next) => {
    DATABASE
 ========================= */
 let lastDbError = null;
+let cachedDb = null;
 
-mongoose
-  .connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/quiz_app')
-  .then(async () => {
+const connectDB = async () => {
+  if (cachedDb && mongoose.connection.readyState === 1) {
+    return cachedDb;
+  }
+
+  const uri = (process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/quiz_app').trim();
+
+  try {
+    const opts = {
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+    };
+
+    console.log('Connecting to MongoDB...');
+    const db = await mongoose.connect(uri, opts);
     console.log('✅ MongoDB connected');
     lastDbError = null;
+    cachedDb = db;
     await createIndexes();
-  })
-  .catch((err) => {
+    return db;
+  } catch (err) {
     console.error('❌ MongoDB error:', err);
     lastDbError = err.message;
-  });
+    // Don't throw, let the app stay up but show the error in health check
+  }
+};
+
+// Start connection but don't block
+connectDB();
+
 
 /* =========================
    ROUTES - WITH CORRECT MOUNTING
