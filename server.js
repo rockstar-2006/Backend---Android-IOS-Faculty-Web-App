@@ -115,6 +115,33 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Root route
+app.get('/', (req, res) => {
+  res.send(`
+    <html>
+      <head>
+        <title>SmartQuiz AI Backend</title>
+        <style>
+          body { font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f0f2f5; }
+          .card { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
+          h1 { color: #1a73e8; }
+          p { color: #5f6368; }
+          .status { display: inline-block; padding: 4px 12px; border-radius: 16px; background: #e6f4ea; color: #1e8e3e; font-weight: bold; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h1>🚀 SmartQuiz AI Backend</h1>
+          <p>The backend is running successfully on Vercel.</p>
+          <div class="status">Status: Online</div>
+          <p style="margin-top: 1rem;"><small>API Base: <code>/api</code></small></p>
+        </div>
+      </body>
+    </html>
+  `);
+});
+
+
 // Test endpoint for students
 app.get('/api/students/test', (req, res) => {
   console.log('🔵 Student test endpoint called');
@@ -164,18 +191,18 @@ app.use(errorHandler);
 const PORT = process.env.PORT || 3001;
 const HOST = '0.0.0.0';
 
-app.listen(PORT, HOST, () => {
-  console.log(`=================================`);
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`=================================`);
-  console.log(`🌐 Local: http://localhost:${PORT}`);
-  console.log(`🔧 Health: /api/health`);
-  console.log(`🔧 Debug: /api/debug`);
-  console.log(`📚 Available routes:`);
-  console.log(`   Teacher Auth: /api/auth`);
-  console.log(`   Teacher Quiz: /api/quiz`);
-  console.log(`   Student Management: /api/students (add, update, delete, upload)`);
-  console.log(`   Student Auth: /api/student (login, register, me)`);
-  console.log(`   Student Quiz: /api/student/quiz (start, submit, results)`);
-  console.log(`=================================`);
-});
+// Export app for Vercel
+module.exports = app;
+
+// Only listen if not running as a Vercel function
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  app.listen(PORT, HOST, () => {
+    console.log(`=================================`);
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`=================================`);
+    console.log(`🌐 Local: http://localhost:${PORT}`);
+    console.log(`🔧 Health: /api/health`);
+    console.log(`🔧 Debug: /api/debug`);
+    console.log(`=================================`);
+  });
+}
