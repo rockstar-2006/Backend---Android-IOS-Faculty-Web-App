@@ -90,11 +90,14 @@ router.post('/register', studentAuthLimiter, async (req, res) => {
     });
 
     if (!studentRecord) {
+      console.log('❌ Student email not found in records:', normalizedEmail);
       return res.status(403).json({
         success: false,
-        message: 'This email is not in the system. Contact your teacher to be added.'
+        message: 'Your email is not registered in our records. Please ensure you are using the email provided to the faculty, or contact your teacher to be added.'
       });
     }
+
+    console.log('✅ Student record found. Proceeding with registration.');
 
     // Check if already registered
     const alreadyRegistered = await StudentAuth.findOne({ email: normalizedEmail });
