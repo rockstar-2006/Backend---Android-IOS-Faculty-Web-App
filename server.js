@@ -12,6 +12,7 @@ const studentRoutes = require('./routes/student');
 const studentQuizRoutes = require('./routes/studentQuiz');
 const studentAuthRoutes = require('./routes/studentAuth');
 const studentAuthQuizRoutes = require('./routes/studentAuthQuiz');
+const systemRoutes = require('./routes/system');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
 const { createIndexes } = require('./config/dbIndexes');
 
@@ -161,6 +162,7 @@ app.use('/api/student-quiz', studentQuizRoutes);
 
 app.use('/api/student', studentAuthRoutes);
 app.use('/api/student', studentAuthQuizRoutes);
+app.use('/api/system', systemRoutes);
 
 // Fast Health Check
 app.get('/api/health', (req, res) => {
