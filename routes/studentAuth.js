@@ -5,6 +5,8 @@ const jwt = require('jsonwebtoken');
 const StudentAuth = require('../models/StudentAuth');
 const Student = require('../models/Student');
 const rateLimit = require('express-rate-limit');
+const sendEmail = require('../utils/sendEmail');
+const crypto = require('crypto');
 
 // Rate limiter for student auth
 const studentAuthLimiter = rateLimit({
@@ -364,6 +366,104 @@ router.get('/debug/check-student/:email', async (req, res) => {
       success: false,
       error: error.message
     });
+  }
+});
+
+// ✅ Forgot Password - Student
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const student = await StudentAuth.findOne({ email: req.body.email.toLowerCase() });
+
+    if (!student) {
+      return res.status(404).json({ success: false, message: 'Student not found with this email' });
+    }
+
+    // Get reset token
+    const resetToken = student.createPasswordResetToken();
+
+    await student.save({ validateBeforeSave: false });
+
+    // Create reset URL
+    const resetUrl = `${req.headers.origin || process.env.FRONTEND_URL}/student/reset-password/${resetToken}`;
+
+    const message = `You are receiving this email because you (or someone else) has requested the reset of a password for your Student account. Please click the link below: \n\n ${resetUrl}`;
+
+    try {
+      await sendEmail({
+        email: student.email,
+        subject: 'Student Password Reset',
+        message,
+        html: `
+          <div style="font-family: sans-serif; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+            <h2 style="color: #6366f1;">Student Password Reset</h2>
+            <p>You requested a password reset for your Student account on Faculty Quest.</p>
+            <p>Please click the button below to reset your password. This link is valid for 10 minutes.</p>
+            <a href="${resetUrl}" style="display: inline-block; padding: 12px 24px; background-color: #6366f1; color: white; text-decoration: none; border-radius: 5px; font-weight: bold; margin: 20px 0;">Reset Password</a>
+            <p>If you did not request this, please ignore this email.</p>
+          </div>
+        `
+      });
+
+      res.status(200).json({ success: true, message: 'Reset email sent successfully' });
+    } catch (err) {
+      console.error(err);
+      student.resetPasswordToken = undefined;
+      student.resetPasswordExpire = undefined;
+      await student.save({ validateBeforeSave: false });
+
+      return res.status(500).json({ success: false, message: 'Email could not be sent' });
+    }
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+// ✅ Reset Password - Student
+router.put('/reset-password/:resetToken', async (req, res) => {
+  try {
+    // Get hashed token
+    const resetPasswordToken = crypto
+      .createHash('sha256')
+      .update(req.params.resetToken)
+      .digest('hex');
+
+    const student = await StudentAuth.findOne({
+      resetPasswordToken,
+      resetPasswordExpire: { $gt: Date.now() }
+    });
+
+    if (!student) {
+      return res.status(400).json({ success: false, message: 'Invalid or expired reset token' });
+    }
+
+    // Set new password
+    student.password = req.body.password;
+    student.resetPasswordToken = undefined;
+    student.resetPasswordExpire = undefined;
+    await student.save();
+
+    res.status(200).json({ success: true, message: 'Password reset successful' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+// ✅ Update Password - Student (Logged in)
+router.put('/update-password', verifyStudentToken, async (req, res) => {
+  try {
+    const student = await StudentAuth.findById(req.student.id);
+
+    // Check current password
+    if (!(await student.comparePassword(req.body.currentPassword))) {
+      return res.status(401).json({ success: false, message: 'Incorrect current password' });
+    }
+
+    student.password = req.body.newPassword;
+    await student.save();
+
+    res.status(200).json({ success: true, message: 'Password updated successfully' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
   }
 });
 

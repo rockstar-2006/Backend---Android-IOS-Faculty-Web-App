@@ -36,16 +36,22 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps or curl)
       if (!origin) return callback(null, true);
+
       const isAllowed = allowedOrigins.some(allowed => {
         if (!allowed) return false;
-        const cleanAllowed = allowed.replace(/\/$/, "");
-        const cleanOrigin = origin.replace(/\/$/, "");
-        return cleanOrigin === cleanAllowed || cleanOrigin.startsWith(cleanAllowed);
+        return origin.startsWith(allowed.replace(/\/$/, ""));
       });
+
+      // Special check for Vercel preview deployment URLs or local IPs
+      const isVercel = origin.endsWith('.vercel.app');
       const isLocalIP = /^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/.test(origin);
-      if (isAllowed || isLocalIP) return callback(null, true);
-      return callback(null, true);
+
+      if (isAllowed || isVercel || isLocalIP) {
+        return callback(null, true);
+      }
+      return callback(new Error('Not allowed by CORS'));
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
