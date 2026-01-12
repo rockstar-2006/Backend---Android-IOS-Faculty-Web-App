@@ -513,4 +513,32 @@ router.get('/:id/results/download', protect, async (req, res) => {
   }
 });
 
+// Delete an individual attempt
+router.delete('/attempts/:id', protect, async (req, res) => {
+  try {
+    const QuizAttempt = require('../models/QuizAttempt');
+    const attempt = await QuizAttempt.findOneAndDelete({
+      _id: req.params.id,
+      teacherId: req.user._id
+    });
+
+    if (!attempt) {
+      return res.status(404).json({
+        success: false,
+        message: 'Attempt not found or unauthorized'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Attempt deleted successfully'
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
 module.exports = router;

@@ -219,6 +219,22 @@ router.post('/delete-multiple', protect, async (req, res) => {
   }
 });
 
+// Delete all students
+router.delete('/delete-all', protect, async (req, res) => {
+  console.log('DELETE /delete-all called for user:', req.user._id);
+  try {
+    const result = await Student.deleteMany({ userId: req.user._id });
+    res.json({
+      success: true,
+      message: `Successfully deleted all ${result.deletedCount} students`,
+      deletedCount: result.deletedCount
+    });
+  } catch (error) {
+    console.error('Error deleting all students:', error);
+    res.status(400).json({ message: error.message });
+  }
+});
+
 // Debug endpoint to list all routes
 router.get('/debug/routes', (req, res) => {
   const routes = router.stack
