@@ -171,10 +171,10 @@ router.post('/register', studentAuthLimiter, async (req, res) => {
   }
 });
 
-// ✅ Student login - REMOVED /student-auth prefix
+// ✅ Student login - PRE-AUTH ENABLED (Zero Friction)
 router.post('/login', studentAuthLimiter, async (req, res) => {
   try {
-    console.log('🔵 [STUDENT LOGIN] Starting...');
+    console.log('🔵 [STUDENT LOGIN] Processing login request...');
 
     const { email, password } = req.body;
 
@@ -185,42 +185,84 @@ router.post('/login', studentAuthLimiter, async (req, res) => {
       });
     }
 
-    // Find student auth record
-    const studentAuth = await StudentAuth.findOne({ email: email.toLowerCase() });
+    const normalizedEmail = email.toLowerCase().trim();
 
+    // 1. Try to find existing student auth record
+    let studentAuth = await StudentAuth.findOne({ email: normalizedEmail });
+
+    // 2. If no auth record exists, check if they are in the teacher's Student list
     if (!studentAuth) {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid credentials or account not found'
+      console.log('🔍 Student not found in Auth system, checking Teacher records:', normalizedEmail);
+
+      const studentRecord = await Student.findOne({
+        email: { $regex: new RegExp("^" + normalizedEmail + "$", "i") }
       });
+
+      if (!studentRecord) {
+        return res.status(401).json({
+          success: false,
+          message: 'Access Denied: Your email is not in the system. Please contact your faculty.'
+        });
+      }
+
+      // If they are in the record, check if they are using their USN as the initial password
+      if (password.toUpperCase() === studentRecord.usn.toUpperCase()) {
+        console.log('✨ [PRE-AUTH] USN match found. Auto-creating Auth record for:', normalizedEmail);
+
+        studentAuth = new StudentAuth({
+          email: normalizedEmail,
+          password: password, // This will be hashed by pre-save middleware
+          name: studentRecord.name,
+          usn: studentRecord.usn,
+          branch: studentRecord.branch,
+          year: studentRecord.year,
+          semester: studentRecord.semester,
+          isVerified: true
+        });
+
+        await studentAuth.save();
+      } else {
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid credentials. If this is your first login, use your USN as the password.'
+        });
+      }
+    } else {
+      // 3. Existing auth record found, check password normally
+
+      // Check if account is locked
+      if (studentAuth.isLocked()) {
+        const remainingTime = Math.ceil((studentAuth.lockUntil - Date.now()) / 60000);
+        return res.status(423).json({
+          success: false,
+          message: `Account locked. Try again in ${remainingTime} minutes`
+        });
+      }
+
+      // Compare password
+      const isMatch = await studentAuth.comparePassword(password);
+
+      if (!isMatch) {
+        // Fallback: Check if they are trying to use USN even after having an account
+        // (This helps students who forgot they changed their password)
+        if (password.toUpperCase() === studentAuth.usn.toUpperCase()) {
+          // If they use USN and it's their current password (unlikely if changed, but possible)
+          // If they changed it but forgot, we should probably force them to use forgot password
+        }
+
+        await studentAuth.incrementFailedAttempts();
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid credentials'
+        });
+      }
     }
 
-    // Check if account is locked
-    if (studentAuth.isLocked()) {
-      const remainingTime = Math.ceil((studentAuth.lockUntil - Date.now()) / 60000);
-      return res.status(423).json({
-        success: false,
-        message: `Account locked. Try again in ${remainingTime} minutes`
-      });
-    }
-
-    // Compare password
-    const isMatch = await studentAuth.comparePassword(password);
-
-    if (!isMatch) {
-      await studentAuth.incrementFailedAttempts();
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid credentials'
-      });
-    }
-
-    // Reset failed attempts
+    // 4. Reset failed attempts and prepare token
     await studentAuth.resetFailedAttempts();
 
-    // Generate token
     const token = generateStudentToken(studentAuth._id);
-    console.log('✅ Student logged in:', studentAuth.email);
+    console.log('✅ Student session established:', studentAuth.email);
 
     res.json({
       success: true,
@@ -240,7 +282,7 @@ router.post('/login', studentAuthLimiter, async (req, res) => {
     console.error('❌ Login error:', error);
     res.status(500).json({
       success: false,
-      message: 'Login failed',
+      message: 'Processing failed',
       error: error.message
     });
   }
