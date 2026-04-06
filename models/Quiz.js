@@ -124,6 +124,13 @@ const quizSchema = new mongoose.Schema({
   timezone: {
     type: String,
     default: 'Asia/Kolkata'
+  },
+  passingGrade: {
+    type: Number,
+    default: 40,
+    min: 0,
+    max: 100,
+    description: 'Percentage score required to pass (0-100)'
   }
 }, {
   timestamps: true

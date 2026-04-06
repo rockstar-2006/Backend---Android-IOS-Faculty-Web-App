@@ -55,7 +55,15 @@ const studentAuthSchema = new mongoose.Schema({
     default: null
   },
   resetPasswordToken: String,
-  resetPasswordExpire: Date
+  resetPasswordExpire: Date,
+  // 🔒 NEW: OTP-based password setup
+  passwordSetupOTP: String,
+  passwordSetupOTPExpire: Date,
+  passwordSetupAttempts: {
+    type: Number,
+    default: 0
+  },
+  passwordSetupOTPEmail: String
 }, {
   timestamps: true
 });

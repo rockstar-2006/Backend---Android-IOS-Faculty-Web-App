@@ -95,7 +95,32 @@ const quizAttemptSchema = new mongoose.Schema({
   isAutoSubmit: {
     type: Boolean,
     default: false
-  }
+  },
+  violations: [{
+    type: String,
+    enum: ['app-switch', 'focus-loss', 'split-screen', 'overlay', 'keyboard-shortcut'],
+    timestamp: {
+      type: Date,
+      default: Date.now
+    },
+    severity: {
+      type: String,
+      enum: ['warning', 'critical'],
+      default: 'warning'
+    }
+  }],
+  violationCount: {
+    type: Number,
+    default: 0
+  },
+  lastViolationAt: Date,
+  utcStartTime: {
+    type: Date,
+    default: function() {
+      return new Date(this.startedAt).toISOString();
+    }
+  },
+  utcSubmitTime: Date
 }, {
   timestamps: true
 });

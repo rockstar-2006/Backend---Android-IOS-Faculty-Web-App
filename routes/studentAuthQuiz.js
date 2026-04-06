@@ -94,6 +94,22 @@ router.get('/quiz/:quizId', verifyStudentToken, async (req, res) => {
       studentEmail: student.email.toLowerCase()
     }).sort('-createdAt');
 
+    // Calculate time remaining for resumed attempts
+    let timeRemaining = null;
+    if (existingAttempt && existingAttempt.status === 'started') {
+      const startTime = new Date(existingAttempt.startedAt).getTime();
+      const nowTime = Date.now();
+      const elapsedSeconds = Math.floor((nowTime - startTime) / 1000);
+      const totalSeconds = (quiz.duration || 30) * 60;
+      timeRemaining = Math.max(0, totalSeconds - elapsedSeconds);
+      console.log('⏱️ Time Remaining Calculated:', { 
+        startedAt: existingAttempt.startedAt,
+        elapsed: elapsedSeconds,
+        total: totalSeconds,
+        remaining: timeRemaining 
+      });
+    }
+
     res.json({
       success: true,
       quiz: {
@@ -121,7 +137,10 @@ router.get('/quiz/:quizId', verifyStudentToken, async (req, res) => {
         status: existingAttempt.status,
         startedAt: existingAttempt.startedAt,
         submittedAt: existingAttempt.submittedAt,
-        score: existingAttempt.totalMarks
+        score: existingAttempt.totalMarks,
+        timeRemaining: timeRemaining,
+        isBlocked: existingAttempt.status === 'blocked',
+        violationReason: existingAttempt.violationReason || null
       } : null
     });
 
@@ -170,17 +189,26 @@ router.post('/quiz/start', verifyStudentToken, async (req, res) => {
 
     console.log('✅ Quiz found:', quiz.title, 'Questions:', quiz.questions.length);
 
-    // Check if student has already submitted this quiz
+    // Check if student has already submitted this quiz OR has been blocked
     const submittedAttempt = await QuizAttempt.findOne({
       quizId: quizId,
       studentEmail: student.email.toLowerCase(),
-      status: { $in: ['submitted', 'graded'] }
+      status: { $in: ['submitted', 'graded', 'blocked', 'expired'] }
     });
 
     if (submittedAttempt) {
+      const reason = submittedAttempt.status === 'blocked' 
+        ? `You have been blocked from retaking this quiz${submittedAttempt.violationReason ? ': ' + submittedAttempt.violationReason : ''}`
+        : submittedAttempt.status === 'expired'
+        ? 'Your quiz attempt expired - you cannot re-attempt'
+        : 'You have already submitted this quiz';
+      
       return res.status(400).json({
         success: false,
-        message: 'You have already submitted this quiz'
+        message: reason,
+        isPreviouslySubmitted: submittedAttempt.status === 'submitted' || submittedAttempt.status === 'graded',
+        isBlocked: submittedAttempt.status === 'blocked',
+        blockReason: submittedAttempt.violationReason
       });
     }
 
@@ -198,7 +226,11 @@ router.post('/quiz/start', verifyStudentToken, async (req, res) => {
         existingAttempt.submittedAt = new Date();
         await existingAttempt.save();
       } else {
-        // Resume existing attempt
+        // Resume existing attempt - calculate time remaining explicitly
+        const elapsedSeconds = Math.floor((new Date() - existingAttempt.startedAt) / 1000);
+        const totalSeconds = (existingAttempt.duration || 30) * 60;
+        const timeRemaining = Math.max(0, totalSeconds - elapsedSeconds);
+        
         return res.json({
           success: true,
           message: 'Resuming existing attempt',
@@ -206,7 +238,7 @@ router.post('/quiz/start', verifyStudentToken, async (req, res) => {
             id: existingAttempt._id,
             status: existingAttempt.status,
             startedAt: existingAttempt.startedAt,
-            timeRemaining: existingAttempt.timeRemaining,
+            timeRemaining: timeRemaining,
             answers: existingAttempt.answers || []
           }
         });
@@ -234,6 +266,11 @@ router.post('/quiz/start', verifyStudentToken, async (req, res) => {
 
     console.log('✅ Quiz attempt created:', attempt._id);
 
+    // Calculate time remaining explicitly (virtual properties don't serialize by default)
+    const elapsedSeconds = Math.floor((new Date() - attempt.startedAt) / 1000);
+    const totalSeconds = (attempt.duration || 30) * 60;
+    const timeRemaining = Math.max(0, totalSeconds - elapsedSeconds);
+
     res.json({
       success: true,
       message: 'Quiz attempt started successfully',
@@ -243,7 +280,7 @@ router.post('/quiz/start', verifyStudentToken, async (req, res) => {
         startedAt: attempt.startedAt,
         duration: attempt.duration,
         maxMarks: attempt.maxMarks,
-        timeRemaining: attempt.timeRemaining
+        timeRemaining: timeRemaining
       }
     });
 
@@ -359,8 +396,51 @@ router.post('/quiz/submit', verifyStudentToken, async (req, res) => {
       });
     }
 
-    // Map student answers and start grading
+    // 🔒 TIMER RACE CONDITION CHECK - Verify submission within time limit
+    const serverStartTime = new Date(attempt.startedAt).getTime();
+    const serverCurrentTime = new Date().getTime();
+    const elapsedServerTime = Math.floor((serverCurrentTime - serverStartTime) / 1000);
+    const totalAllowedSeconds = (attempt.duration || 30) * 60;
+
+    console.log(`⏱️  [TIMER CHECK] Elapsed: ${elapsedServerTime}s, Allowed: ${totalAllowedSeconds}s`);
+
+    // Allow 5-second grace period for network/processing latency
+    if (elapsedServerTime > totalAllowedSeconds + 5) {
+      console.log(`❌ [TIMER EXPIRED] Submission rejected (${elapsedServerTime - totalAllowedSeconds}s over)`);
+      attempt.status = 'expired';
+      attempt.violationReason = 'Time limit exceeded';
+      attempt.utcSubmitTime = new Date().toISOString();
+      await attempt.save();
+
+      return res.status(403).json({
+        success: false,
+        message: 'Quiz time limit exceeded. Submission rejected.',
+        timeExpired: true,
+        elapsedSeconds: elapsedServerTime,
+        maxSeconds: totalAllowedSeconds
+      });
+    }
+
+    // 🌐 STORE UTC TIMES for consistent timezone handling
+    attempt.utcStartTime = new Date(attempt.startedAt).toISOString();
+    attempt.utcSubmitTime = new Date().toISOString();
+
+    // Validate that student has answered at least one question
     const formattedAnswers = Array.isArray(answers) ? answers : [];
+    const answeredQuestions = formattedAnswers.filter(a => 
+      a.studentAnswer && a.studentAnswer.toString().trim().length > 0
+    );
+
+    if (answeredQuestions.length === 0) {
+      console.log('❌ [VALIDATION] No questions answered');
+      return res.status(400).json({
+        success: false,
+        message: 'You must answer at least one question before submitting',
+        errorCode: 'NO_ANSWERS_PROVIDED'
+      });
+    }
+
+    const formattedAnswersForGrading = Array.isArray(answers) ? answers : [];
     let totalScore = 0;
     const finalQuestionResults = [];
 
@@ -368,7 +448,7 @@ router.post('/quiz/submit', verifyStudentToken, async (req, res) => {
 
     for (const question of quiz.questions) {
       const qId = question._id.toString();
-      const studentAnswerObj = formattedAnswers.find(a => a.questionId === qId);
+      const studentAnswerObj = formattedAnswersForGrading.find(a => a.questionId === qId);
       const studentAnswer = studentAnswerObj ? studentAnswerObj.studentAnswer : '';
 
       console.log(`🔍 Checking Question ${qId}: Student Answer = "${studentAnswer}"`);
@@ -483,17 +563,17 @@ router.get('/quiz/:quizId/results', verifyStudentToken, async (req, res) => {
     const { quizId } = req.params;
     const student = req.student;
 
-    // Find submitted attempt
+    // Find submitted attempt (including blocked and graded attempts)
     const attempt = await QuizAttempt.findOne({
       quizId: quizId,
       studentEmail: student.email.toLowerCase(),
-      status: 'submitted'
+      status: { $in: ['submitted', 'graded', 'blocked'] }
     }).sort('-submittedAt');
 
     if (!attempt) {
       return res.status(404).json({
         success: false,
-        message: 'No submitted attempt found'
+        message: 'No completed attempt found'
       });
     }
 
@@ -502,7 +582,7 @@ router.get('/quiz/:quizId/results', verifyStudentToken, async (req, res) => {
 
     res.json({
       success: true,
-      results: {
+      data: {
         id: attempt._id,
         score: attempt.totalMarks,
         maxMarks: attempt.maxMarks,
@@ -512,6 +592,10 @@ router.get('/quiz/:quizId/results', verifyStudentToken, async (req, res) => {
         submittedAt: attempt.submittedAt,
         timeSpent: attempt.timeSpent,
         isAutoSubmit: attempt.isAutoSubmit,
+        isBlocked: attempt.status === 'blocked',
+        blockReason: attempt.violationReason,
+        detailedResults: attempt.answers,
+        results: attempt.answers,
         answers: attempt.answers,
         quizTitle: quiz ? quiz.title : 'Unknown Quiz'
       }
@@ -522,6 +606,76 @@ router.get('/quiz/:quizId/results', verifyStudentToken, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch results',
+      error: error.message
+    });
+  }
+});
+
+// ✅ LOG VIOLATION - New endpoint for server-side violation tracking
+router.post('/quiz/log-violation', verifyStudentToken, async (req, res) => {
+  try {
+    const { attemptId, violationType, reason } = req.body;
+    const student = req.student;
+
+    if (!attemptId || !violationType) {
+      return res.status(400).json({
+        success: false,
+        message: 'Attempt ID and violation type are required'
+      });
+    }
+
+    // Find attempt
+    const attempt = await QuizAttempt.findOne({
+      _id: attemptId,
+      studentEmail: student.email.toLowerCase(),
+      status: { $in: ['started', 'in-progress'] }
+    });
+
+    if (!attempt) {
+      return res.status(404).json({
+        success: false,
+        message: 'Attempt not found'
+      });
+    }
+
+    // 🔒 CRITICAL: Log violation to backend (audit trail)
+    const violationRecord = {
+      type: violationType,
+      timestamp: new Date(),
+      reason: reason || 'No reason provided',
+      severity: violationType === 'app-switch' ? 'critical' : 'warning'
+    };
+
+    attempt.violations.push(violationRecord);
+    attempt.violationCount = (attempt.violationCount || 0) + 1;
+    attempt.lastViolationAt = new Date();
+
+    console.log(`🚨 [VIOLATION LOGGED] ${student.email} - Type: ${violationType}, Count: ${attempt.violationCount}, Reason: ${reason}`);
+
+    // If 3+ violations, auto-block
+    if (attempt.violationCount >= 3) {
+      console.log(`❌ [AUTO-BLOCK] Student reached 3 violations. Auto-submitting and blocking.`);
+      attempt.status = 'blocked';
+      attempt.violationReason = `Permanently blocked after ${attempt.violationCount} security violations: ${reason}`;
+      attempt.submittedAt = new Date();
+      attempt.utcSubmitTime = new Date().toISOString();
+    }
+
+    await attempt.save();
+
+    res.json({
+      success: true,
+      message: 'Violation logged successfully',
+      violationCount: attempt.violationCount,
+      blocked: attempt.violationCount >= 3,
+      blockReason: attempt.violationReason
+    });
+
+  } catch (error) {
+    console.error('❌ Log violation error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to log violation',
       error: error.message
     });
   }

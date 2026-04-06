@@ -171,7 +171,7 @@ router.post('/register', studentAuthLimiter, async (req, res) => {
   }
 });
 
-// ✅ Student login - PRE-AUTH ENABLED (Zero Friction)
+// ✅ Student login - NEW: Guides password setup first
 router.post('/login', studentAuthLimiter, async (req, res) => {
   try {
     console.log('🔵 [STUDENT LOGIN] Processing login request...');
@@ -205,28 +205,16 @@ router.post('/login', studentAuthLimiter, async (req, res) => {
         });
       }
 
-      // If they are in the record, check if they are using their USN as the initial password
-      if (password.toUpperCase() === studentRecord.usn.toUpperCase()) {
-        console.log('✨ [PRE-AUTH] USN match found. Auto-creating Auth record for:', normalizedEmail);
+      // 🔒 NEW: Guide student to password setup instead of USN auth
+      console.log('🔐 [NEW STUDENT] Directing to password setup:', normalizedEmail);
+      return res.status(401).json({
+        success: false,
+        message: 'Your account needs to be set up first. We will send you an OTP to create your password.',
+        code: 'SETUP_REQUIRED',
+        requiresSetup: true,
+        email: normalizedEmail
+      });
 
-        studentAuth = new StudentAuth({
-          email: normalizedEmail,
-          password: password, // This will be hashed by pre-save middleware
-          name: studentRecord.name,
-          usn: studentRecord.usn,
-          branch: studentRecord.branch,
-          year: studentRecord.year,
-          semester: studentRecord.semester,
-          isVerified: true
-        });
-
-        await studentAuth.save();
-      } else {
-        return res.status(401).json({
-          success: false,
-          message: 'Invalid credentials. If this is your first login, use your USN as the password.'
-        });
-      }
     } else {
       // 3. Existing auth record found, check password normally
 
@@ -243,13 +231,6 @@ router.post('/login', studentAuthLimiter, async (req, res) => {
       const isMatch = await studentAuth.comparePassword(password);
 
       if (!isMatch) {
-        // Fallback: Check if they are trying to use USN even after having an account
-        // (This helps students who forgot they changed their password)
-        if (password.toUpperCase() === studentAuth.usn.toUpperCase()) {
-          // If they use USN and it's their current password (unlikely if changed, but possible)
-          // If they changed it but forgot, we should probably force them to use forgot password
-        }
-
         await studentAuth.incrementFailedAttempts();
         return res.status(401).json({
           success: false,
@@ -345,6 +326,30 @@ router.get('/quizzes', verifyStudentToken, async (req, res) => {
           studentEmail: studentEmail
         }).sort('-createdAt');
 
+        // Map attempt status to display status
+        let displayStatus = 'available';  // Default for no attempts
+        let attemptStatus = 'not_started';
+        
+        if (attempt) {
+          attemptStatus = attempt.status;
+          
+          // EXPLICIT status mapping (no 'active' status - either available, completed, or disqualified)
+          if (attempt.status === 'submitted' || attempt.status === 'graded') {
+            displayStatus = 'completed';  // Quiz completed/graded - show in Completed tab
+          } else if (attempt.status === 'blocked' || attempt.status === 'expired') {
+            displayStatus = 'disqualified'; // Quiz blocked/failed - show in Blocked tab
+          } else if (attempt.status === 'started' || attempt.status === 'in-progress') {
+            // If quiz is started but not submitted yet - don't show in AVAILABLE
+            // Instead, treat it as disqualified/blocked so it doesn't appear in available
+            displayStatus = 'in-progress'; 
+          } else {
+            // Any other status: not available for new attempt
+            displayStatus = 'disqualified';
+          }
+        }
+        
+        console.log(`   Quiz: ${quiz.title} | Attempt Status: ${attemptStatus} | Display Status: ${displayStatus}`);
+
         return {
           id: quiz._id,
           title: quiz.title,
@@ -354,12 +359,20 @@ router.get('/quizzes', verifyStudentToken, async (req, res) => {
           questionCount: quiz.questions?.length || 0,
           createdAt: quiz.createdAt,
           createdBy: quiz.createdBy,
-          attemptStatus: attempt ? attempt.status : 'not_started',
+          status: displayStatus,  // PRIMARY STATUS FOR FRONTEND CATEGORIZATION
+          attemptStatus: attemptStatus,  // Detailed status 
+          passingGrade: quiz.passingGrade || 40,  // 🔒 Dynamic passing grade from quiz config
           attemptId: attempt?._id,
           score: attempt?.totalMarks,
           reason: attempt?.violationReason,
           percentage: attempt?.percentage,
-          submittedAt: attempt?.submittedAt
+          submittedAt: attempt?.submittedAt,
+          result: attempt && (attempt.status === 'submitted' || attempt.status === 'graded') ? {
+            score: attempt.totalMarks,
+            totalQuestions: quiz.questions?.length || 0,
+            percentage: attempt.percentage,
+            isPassed: (attempt.percentage || 0) >= (quiz.passingGrade || 40)  // 🔒 Use quiz passing grade
+          } : null
         };
       })
     );
@@ -367,7 +380,8 @@ router.get('/quizzes', verifyStudentToken, async (req, res) => {
     res.json({
       success: true,
       count: quizzesWithStatus.length,
-      quizzes: quizzesWithStatus
+      data: quizzesWithStatus,
+      quizzes: quizzesWithStatus  // Support both response formats
     });
   } catch (error) {
     console.error('❌ Get student quizzes error:', error);
@@ -506,6 +520,170 @@ router.put('/update-password', verifyStudentToken, async (req, res) => {
     res.status(200).json({ success: true, message: 'Password updated successfully' });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+// 🔒 NEW: Request OTP for password setup (students who haven't set password yet)
+router.post('/request-setup-otp', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is required'
+      });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Find student auth record
+    let studentAuth = await StudentAuth.findOne({ email: normalizedEmail });
+
+    if (!studentAuth) {
+      // Not in system yet - check Student collection
+      const Student = require('../models/Student');
+      const studentRecord = await Student.findOne({ 
+        email: { $regex: new RegExp(`^${normalizedEmail}$`, 'i') }
+      });
+
+      if (!studentRecord) {
+        return res.status(404).json({
+          success: false,
+          message: 'Email not found in the system. Please contact your faculty.'
+        });
+      }
+
+      // Create new StudentAuth record
+      studentAuth = new StudentAuth({
+        email: normalizedEmail,
+        name: studentRecord.name,
+        usn: studentRecord.usn,
+        branch: studentRecord.branch,
+        year: studentRecord.year,
+        semester: studentRecord.semester,
+        password: 'temp_' + Math.random().toString(36)  // Temporary, will be changed
+      });
+
+      await studentAuth.save();
+    }
+
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpireTime = new Date(Date.now() + 10 * 60 * 1000);  // 10 minutes
+
+    studentAuth.passwordSetupOTP = otp;
+    studentAuth.passwordSetupOTPExpire = otpExpireTime;
+    studentAuth.passwordSetupOTPEmail = normalizedEmail;
+    studentAuth.passwordSetupAttempts = 0;
+
+    await studentAuth.save();
+
+    // 📧 Send OTP email
+    try {
+      const emailService = require('../services/emailService');
+      await emailService.sendPasswordSetupOTP(normalizedEmail, otp, studentAuth.name || 'Student');
+      console.log(`✅ [OTP SENT] Email: ${normalizedEmail}, OTP: ${otp}`);
+    } catch (emailError) {
+      console.error('⚠️ Email send failed:', emailError);
+      // Still allow OTP but with console fallback
+    }
+
+    res.json({
+      success: true,
+      message: 'OTP sent to your email. Valid for 10 minutes.',
+      email: normalizedEmail
+    });
+
+  } catch (error) {
+    console.error('❌ Request OTP error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to send OTP',
+      error: error.message
+    });
+  }
+});
+
+// 🔒 NEW: Verify OTP and set password
+router.post('/verify-setup-otp', async (req, res) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+
+    if (!email || !otp || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email, OTP, and new password are required'
+      });
+    }
+
+    // Validate password strength
+    if (newPassword.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must be at least 8 characters long'
+      });
+    }
+
+    if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(newPassword)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must contain uppercase, lowercase, and number'
+      });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Find student auth record
+    const studentAuth = await StudentAuth.findOne({ 
+      email: normalizedEmail,
+      passwordSetupOTP: otp
+    });
+
+    if (!studentAuth) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid OTP or email'
+      });
+    }
+
+    // Check OTP expiry
+    if (!studentAuth.passwordSetupOTPExpire || studentAuth.passwordSetupOTPExpire < Date.now()) {
+      return res.status(401).json({
+        success: false,
+        message: 'OTP expired. Request a new one.'
+      });
+    }
+
+    // Check attempt limit
+    if ((studentAuth.passwordSetupAttempts || 0) >= 3) {
+      return res.status(429).json({
+        success: false,
+        message: 'Too many attempts. Request a new OTP.'
+      });
+    }
+
+    // Update password and mark as verified
+    studentAuth.password = newPassword;
+    studentAuth.isVerified = true;
+    studentAuth.passwordSetupOTP = undefined;
+    studentAuth.passwordSetupOTPExpire = undefined;
+    studentAuth.passwordSetupAttempts = 0;
+
+    await studentAuth.save();
+
+    res.json({
+      success: true,
+      message: 'Password set successfully! You can now login.'
+    });
+
+  } catch (error) {
+    console.error('❌ Verify OTP error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to verify OTP',
+      error: error.message
+    });
   }
 });
 
