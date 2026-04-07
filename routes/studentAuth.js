@@ -186,41 +186,67 @@ router.post('/login', studentAuthLimiter, async (req, res) => {
     }
 
     const normalizedEmail = email.toLowerCase().trim();
+    console.log('🔍 [STUDENT LOGIN] Normalized Email:', normalizedEmail);
+    console.log('🔍 [STUDENT LOGIN] Provided Password (might be USN):', password);
 
     // 1. Try to find existing student auth record
     let studentAuth = await StudentAuth.findOne({ email: normalizedEmail });
+    console.log('🔍 [STUDENT LOGIN] Existing StudentAuth record found:', !!studentAuth);
 
     // 2. If no auth record exists, check if they are in the teacher's Student list
     if (!studentAuth) {
-      console.log('🔍 Student not found in Auth system, checking Teacher records:', normalizedEmail);
+      console.log('🔍 [STUDENT LOGIN] No Auth record. Searching Student collection for:', normalizedEmail);
 
       const studentRecord = await Student.findOne({
         email: { $regex: new RegExp("^" + normalizedEmail + "$", "i") }
       });
 
       if (!studentRecord) {
+        console.log('❌ [STUDENT LOGIN] Student email NOT found in Teacher records:', normalizedEmail);
         return res.status(401).json({
           success: false,
-          message: 'Access Denied: Your email is not in the system. Please contact your faculty.'
+          message: 'Access Denied: Your email is not in the system. Please ensure you are using the email provided to the faculty, or contact your teacher to be added.'
         });
       }
 
-      // 🔒 NEW: Guide student to password setup instead of USN auth
-      console.log('🔐 [NEW STUDENT] Directing to password setup:', normalizedEmail);
-      return res.status(401).json({
-        success: false,
-        message: 'Your account needs to be set up first. We will send you an OTP to create your password.',
-        code: 'SETUP_REQUIRED',
-        requiresSetup: true,
-        email: normalizedEmail
+      console.log('✅ [STUDENT LOGIN] Student record found in Teacher database. USN in record:', studentRecord.usn);
+
+      // 🔐 NEW: Allow login with USN as default password (case-insensitive & trimmed)
+      const providedUSN = password.toString().trim().toUpperCase();
+      const dbUSN = studentRecord.usn.toString().trim().toUpperCase();
+
+      if (providedUSN !== dbUSN) {
+        console.log(`❌ [STUDENT LOGIN] USN mismatch. Provided: "${providedUSN}", DB: "${dbUSN}"`);
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid credentials. For your first login, please use your USN as the password provided by your teacher.',
+          requiresUSN: true
+        });
+      }
+
+      console.log('✅ [STUDENT LOGIN] First login with USN successful. Creating new StudentAuth for:', normalizedEmail);
+      
+      // Create student auth record automatically
+      studentAuth = new StudentAuth({
+        email: normalizedEmail,
+        password: password, // This will be USN, and will be hashed by pre-save hook
+        name: studentRecord.name,
+        usn: studentRecord.usn,
+        branch: studentRecord.branch,
+        year: studentRecord.year,
+        semester: studentRecord.semester,
+        isVerified: true
       });
 
+      await studentAuth.save();
     } else {
       // 3. Existing auth record found, check password normally
+      console.log('🔍 [STUDENT LOGIN] Auth record found. Verifying password for:', normalizedEmail);
 
       // Check if account is locked
       if (studentAuth.isLocked()) {
         const remainingTime = Math.ceil((studentAuth.lockUntil - Date.now()) / 60000);
+        console.log('❌ [STUDENT LOGIN] Account is currently locked for:', normalizedEmail);
         return res.status(423).json({
           success: false,
           message: `Account locked. Try again in ${remainingTime} minutes`
@@ -228,13 +254,24 @@ router.post('/login', studentAuthLimiter, async (req, res) => {
       }
 
       // Compare password
-      const isMatch = await studentAuth.comparePassword(password);
+      let isMatch = await studentAuth.comparePassword(password);
+      console.log('🔍 [STUDENT LOGIN] Normal password match result:', isMatch);
+
+      // 🔐 ALSO: Allow login with USN anytime (as per user request)
+      const providedFallbackUSN = password.toString().trim().toUpperCase();
+      const dbFallbackUSN = studentAuth.usn.toString().trim().toUpperCase();
+
+      if (!isMatch && providedFallbackUSN === dbFallbackUSN) {
+        console.log('✅ [STUDENT LOGIN] Login with USN fallback successful for existing student:', normalizedEmail);
+        isMatch = true;
+      }
 
       if (!isMatch) {
+        console.log('❌ [STUDENT LOGIN] ALL password attempts failed for:', normalizedEmail);
         await studentAuth.incrementFailedAttempts();
         return res.status(401).json({
           success: false,
-          message: 'Invalid credentials'
+          message: 'Invalid credentials. Use your password or your USN.'
         });
       }
     }
@@ -329,10 +366,10 @@ router.get('/quizzes', verifyStudentToken, async (req, res) => {
         // Map attempt status to display status
         let displayStatus = 'available';  // Default for no attempts
         let attemptStatus = 'not_started';
-        
+
         if (attempt) {
           attemptStatus = attempt.status;
-          
+
           // EXPLICIT status mapping (no 'active' status - either available, completed, or disqualified)
           if (attempt.status === 'submitted' || attempt.status === 'graded') {
             displayStatus = 'completed';  // Quiz completed/graded - show in Completed tab
@@ -341,13 +378,13 @@ router.get('/quizzes', verifyStudentToken, async (req, res) => {
           } else if (attempt.status === 'started' || attempt.status === 'in-progress') {
             // If quiz is started but not submitted yet - don't show in AVAILABLE
             // Instead, treat it as disqualified/blocked so it doesn't appear in available
-            displayStatus = 'in-progress'; 
+            displayStatus = 'in-progress';
           } else {
             // Any other status: not available for new attempt
             displayStatus = 'disqualified';
           }
         }
-        
+
         console.log(`   Quiz: ${quiz.title} | Attempt Status: ${attemptStatus} | Display Status: ${displayStatus}`);
 
         return {
@@ -543,7 +580,7 @@ router.post('/request-setup-otp', async (req, res) => {
     if (!studentAuth) {
       // Not in system yet - check Student collection
       const Student = require('../models/Student');
-      const studentRecord = await Student.findOne({ 
+      const studentRecord = await Student.findOne({
         email: { $regex: new RegExp(`^${normalizedEmail}$`, 'i') }
       });
 
@@ -635,7 +672,7 @@ router.post('/verify-setup-otp', async (req, res) => {
     const normalizedEmail = email.toLowerCase().trim();
 
     // Find student auth record
-    const studentAuth = await StudentAuth.findOne({ 
+    const studentAuth = await StudentAuth.findOne({
       email: normalizedEmail,
       passwordSetupOTP: otp
     });
@@ -678,7 +715,7 @@ router.post('/verify-setup-otp', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Verify OTP error:', error);
+    console.error('Verify OTP error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to verify OTP',
