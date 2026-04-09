@@ -110,13 +110,38 @@ router.get('/quiz/:quizId', verifyStudentToken, async (req, res) => {
       });
     }
 
+    // 🎲 DETERMINISTIC SHUFFLE: Shuffle questions using student email + quizId as a seed
+    // This ensures each student gets a unique order, but it stays consistent for them if they refresh.
+    const shuffleArray = (array, seedString) => {
+      let seed = 0;
+      for (let i = 0; i < seedString.length; i++) {
+        seed = (seed << 5) - seed + seedString.charCodeAt(i);
+        seed |= 0; // Convert to 32bit integer
+      }
+
+      const random = () => {
+        const x = Math.sin(seed++) * 10000;
+        return x - Math.floor(x);
+      };
+
+      const shuffled = [...array];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      return shuffled;
+    };
+
+    const seed = `${quizId}-${student.email.toLowerCase()}`;
+    const shuffledQuestions = shuffleArray(quiz.questions, seed);
+
     res.json({
       success: true,
       quiz: {
         id: quiz._id,
         title: quiz.title,
         description: quiz.description,
-        questions: quiz.questions.map(q => ({
+        questions: shuffledQuestions.map(q => ({
           id: q._id,
           question: q.question,
           type: q.type,
