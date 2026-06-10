@@ -664,11 +664,14 @@ router.post('/quiz/log-violation', verifyStudentToken, async (req, res) => {
     }
 
     // 🔒 CRITICAL: Log violation to backend (audit trail)
+    const allowedTypes = ['app-switch', 'focus-loss', 'split-screen', 'overlay', 'keyboard-shortcut'];
+    const safeType = allowedTypes.includes(violationType) ? violationType : 'focus-loss';
+
     const violationRecord = {
-      type: violationType,
+      violationType: safeType,
       timestamp: new Date(),
       reason: reason || 'No reason provided',
-      severity: violationType === 'app-switch' ? 'critical' : 'warning'
+      severity: safeType === 'app-switch' || safeType === 'overlay' ? 'critical' : 'warning'
     };
 
     attempt.violations.push(violationRecord);

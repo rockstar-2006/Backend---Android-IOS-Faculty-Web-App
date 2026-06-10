@@ -97,8 +97,14 @@ const quizAttemptSchema = new mongoose.Schema({
     default: false
   },
   violations: [{
-    type: String,
-    enum: ['app-switch', 'focus-loss', 'split-screen', 'overlay', 'keyboard-shortcut'],
+    violationType: {
+      type: String,
+      enum: ['app-switch', 'focus-loss', 'split-screen', 'overlay', 'keyboard-shortcut'],
+    },
+    reason: {
+      type: String,
+      default: 'No reason provided'
+    },
     timestamp: {
       type: Date,
       default: Date.now

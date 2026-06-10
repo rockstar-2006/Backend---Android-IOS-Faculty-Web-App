@@ -2,6 +2,7 @@ const express = require('express');
 const Quiz = require('../models/Quiz');
 const Student = require('../models/Student');
 const { protect } = require('../middleware/auth');
+const emailService = require('../services/emailService');
 const router = express.Router();
 
 // Get all quizzes with attempt statistics
@@ -362,12 +363,12 @@ router.post('/share', protect, async (req, res) => {
     // Save the updated quiz
     await quiz.save();
 
-    console.log('✅ Quiz shared successfully. Shared:', shared.length, 'Failed:', failed.length);
+    console.log('✅ Quiz shared (Android) successfully. Shared:', shared.length, 'Failed:', failed.length);
 
     // Prepare response
     const response = {
       success: true,
-      message: `Quiz "${quiz.title}" shared with ${shared.length} student(s)`,
+      message: `Quiz "${quiz.title}" shared with ${shared.length} student(s) for Android`,
       shared,
       failed: failed.length > 0 ? failed : undefined
     };
@@ -385,6 +386,59 @@ router.post('/share', protect, async (req, res) => {
       message: 'Failed to share quiz',
       error: error.message
     });
+  }
+});
+
+// Send browser quiz link via email (for iPhone / web users) — SEPARATE from Android share
+router.post('/send-web-links', protect, async (req, res) => {
+  try {
+    const { quizId, studentEmails } = req.body;
+
+    if (!quizId || !studentEmails || studentEmails.length === 0) {
+      return res.status(400).json({ success: false, message: 'quizId and studentEmails are required' });
+    }
+
+    const quiz = await Quiz.findOne({ _id: quizId, userId: req.user._id });
+    if (!quiz) {
+      return res.status(404).json({ success: false, message: 'Quiz not found or unauthorized' });
+    }
+
+    // Respond immediately — emails fire in the background
+    res.json({
+      success: true,
+      message: `Sending web quiz links to ${studentEmails.length} student(s) via email...`,
+      emailQueued: studentEmails.length
+    });
+
+    // 📧 BULK EMAIL — parallel fire-and-forget
+    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+    const teacherName = req.user?.name || req.user?.email || 'Your Teacher';
+
+    const emailPromises = studentEmails.map(async (email) => {
+      const normalizedEmail = email.toLowerCase().trim();
+      const token = Buffer.from(`${normalizedEmail}||${quiz._id}`).toString('base64');
+      const uniqueLink = `${clientUrl}/quiz/secure/attempt/${token}`;
+
+      return emailService.sendQuizInvitation(
+        normalizedEmail,
+        quiz.title,
+        uniqueLink,
+        teacherName
+      );
+    });
+
+    Promise.allSettled(emailPromises).then((results) => {
+      const sent = results.filter(r => r.status === 'fulfilled').length;
+      const failed = results.filter(r => r.status === 'rejected');
+      console.log(`📧 Web link email complete: ${sent}/${studentEmails.length} sent.`);
+      failed.forEach((r, i) => {
+        console.error(`❌ Email failed for ${studentEmails[i]}: ${r.reason?.message}`);
+      });
+    });
+
+  } catch (error) {
+    console.error('❌ Error sending web links:', error);
+    // Response already sent above, so we can only log
   }
 });
 
