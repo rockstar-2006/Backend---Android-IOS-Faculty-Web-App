@@ -18,13 +18,33 @@ const userSchema = new mongoose.Schema({
   password: {
     type: String,
     required: [true, 'Password is required'],
-    minlength: 8,
+    minlength: 6,
     select: false
   },
   role: {
     type: String,
     enum: ['faculty', 'admin'],
     default: 'faculty'
+  },
+  // 🧠 Custom AI Provider & Prompt Configuration
+  aiSettings: {
+    provider: {
+      type: String,
+      enum: ['system_default', 'gemini', 'groq', 'claude'],
+      default: 'system_default'
+    },
+    apiKey: {
+      type: String,
+      default: ''
+    },
+    modelName: {
+      type: String,
+      default: 'gemini-2.5-flash'
+    },
+    customPrompt: {
+      type: String,
+      default: ''
+    }
   },
   createdAt: {
     type: Date,
@@ -49,17 +69,15 @@ userSchema.methods.comparePassword = async function (candidatePassword) {
 // Generate and hash password token
 userSchema.methods.createPasswordResetToken = function () {
   const crypto = require('crypto');
-  // Generate token
   const resetToken = crypto.randomBytes(20).toString('hex');
 
-  // Hash token and set to resetPasswordToken field
   this.resetPasswordToken = crypto
     .createHash('sha256')
     .update(resetToken)
     .digest('hex');
 
-  // Set expire
-  this.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 minutes
+  // Set expire time to 10 minutes
+  this.resetPasswordExpire = Date.now() + 10 * 60 * 1000;
 
   return resetToken;
 };

@@ -223,4 +223,49 @@ router.put('/update-password', protect, async (req, res) => {
   }
 });
 
+// 🧠 Get Faculty AI Settings
+router.get('/ai-settings', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('aiSettings');
+    res.json({
+      success: true,
+      data: user.aiSettings || {
+        provider: 'system_default',
+        apiKey: '',
+        modelName: 'gemini-2.5-flash',
+        customPrompt: ''
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to fetch AI settings', error: error.message });
+  }
+});
+
+// 🧠 Update Faculty AI Settings & Custom Prompt
+router.put('/ai-settings', protect, async (req, res) => {
+  try {
+    const { provider, apiKey, modelName, customPrompt } = req.body;
+
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    user.aiSettings = {
+      provider: provider || 'system_default',
+      apiKey: apiKey !== undefined ? apiKey : (user.aiSettings?.apiKey || ''),
+      modelName: modelName || 'gemini-2.5-flash',
+      customPrompt: customPrompt !== undefined ? customPrompt : (user.aiSettings?.customPrompt || '')
+    };
+
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'AI Model configuration and custom prompts saved successfully',
+      data: user.aiSettings
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
 module.exports = router;

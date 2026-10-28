@@ -6,6 +6,7 @@ const StudentAuth = require('../models/StudentAuth');
 const Quiz = require('../models/Quiz');
 const QuizAttempt = require('../models/QuizAttempt');
 const gradingService = require('../services/gradingService');
+const quizCache = require('../utils/quizCache');
 
 // Middleware to verify student token (duplicated here for completeness)
 const verifyStudentToken = async (req, res, next) => {
@@ -56,27 +57,42 @@ router.get('/quiz/:quizId', verifyStudentToken, async (req, res) => {
 
     console.log('🔵 [GET QUIZ DETAILS] Student:', student.email, 'Quiz ID:', quizId);
 
-    // Find quiz
-    const quiz = await Quiz.findOne({
-      _id: quizId,
-      sharedWith: {
-        $elemMatch: {
-          $regex: new RegExp("^" + student.email.toLowerCase() + "$", "i")
-        }
+    // ⚡ Optimization B: In-Memory Quiz Caching (0 Database Reads on High Concurrency)
+    let quiz = quizCache.get(quizId);
+    if (!quiz) {
+      console.log('📦 Quiz cache MISS - Reading from MongoDB:', quizId);
+      quiz = await Quiz.findById(quizId).lean();
+      if (quiz) {
+        quizCache.set(quizId, quiz);
       }
-    });
+    } else {
+      console.log('⚡ Quiz cache HIT - Serving directly from Node RAM:', quizId);
+    }
 
     if (!quiz) {
+      return res.status(404).json({
+        success: false,
+        message: 'Quiz not found'
+      });
+    }
+
+    // Verify student authorization in memory (case-insensitive)
+    const studentEmailLower = student.email.toLowerCase();
+    const isSharedWithStudent = (quiz.sharedWith || []).some(
+      (email) => email && email.toLowerCase() === studentEmailLower
+    );
+
+    if (!isSharedWithStudent) {
       return res.status(404).json({
         success: false,
         message: 'Quiz not found or not shared with you'
       });
     }
 
-    console.log('✅ Quiz found:', quiz.title, 'Questions:', quiz.questions.length);
+    console.log('✅ Quiz ready:', quiz.title, 'Questions:', (quiz.questions || []).length);
 
-    // Check scheduling constraints
-    const accessibility = quiz.isAccessible();
+    // Check scheduling constraints via in-memory evaluator
+    const accessibility = quizCache.isAccessible(quiz);
     if (!accessibility.accessible) {
       console.log('🚫 [ACCESS DENIED] Quiz not accessible:', accessibility.message);
       return res.status(403).json({
@@ -195,24 +211,36 @@ router.post('/quiz/start', verifyStudentToken, async (req, res) => {
       });
     }
 
-    // Find quiz
-    const quiz = await Quiz.findOne({
-      _id: quizId,
-      sharedWith: {
-        $elemMatch: {
-          $regex: new RegExp("^" + student.email.toLowerCase() + "$", "i")
-        }
+    // Find quiz (RAM cache lookup first)
+    let quiz = quizCache.get(quizId);
+    if (!quiz) {
+      quiz = await Quiz.findById(quizId).lean();
+      if (quiz) {
+        quizCache.set(quizId, quiz);
       }
-    });
+    }
 
     if (!quiz) {
+      return res.status(404).json({
+        success: false,
+        message: 'Quiz not found'
+      });
+    }
+
+    // Verify student authorization in memory (case-insensitive)
+    const studentEmailLower = student.email.toLowerCase();
+    const isShared = (quiz.sharedWith || []).some(
+      (email) => email && email.toLowerCase() === studentEmailLower
+    );
+
+    if (!isShared) {
       return res.status(404).json({
         success: false,
         message: 'Quiz not found or not shared with you'
       });
     }
 
-    console.log('✅ Quiz found:', quiz.title, 'Questions:', quiz.questions.length);
+    console.log('✅ Quiz found:', quiz.title, 'Questions:', (quiz.questions || []).length);
 
     // Check if student has already submitted this quiz OR has been blocked
     const submittedAttempt = await QuizAttempt.findOne({
@@ -411,8 +439,14 @@ router.post('/quiz/submit', verifyStudentToken, async (req, res) => {
       });
     }
 
-    // Get quiz for grading
-    const quiz = await Quiz.findById(attempt.quizId);
+    // Get quiz for grading (RAM cache lookup first to absorb concurrent 3,000-student submit spikes)
+    let quiz = quizCache.get(attempt.quizId);
+    if (!quiz) {
+      quiz = await Quiz.findById(attempt.quizId).lean();
+      if (quiz) {
+        quizCache.set(attempt.quizId, quiz);
+      }
+    }
 
     if (!quiz) {
       return res.status(404).json({
@@ -471,8 +505,8 @@ router.post('/quiz/submit', verifyStudentToken, async (req, res) => {
 
     console.log(`📊 [GRADING] Starting evaluation for attempt: ${attemptId}`);
 
-    for (const question of quiz.questions) {
-      const qId = question._id.toString();
+    for (const question of (quiz.questions || [])) {
+      const qId = (question._id || question.id || '').toString();
       const studentAnswerObj = formattedAnswersForGrading.find(a => a.questionId === qId);
       const studentAnswer = studentAnswerObj ? studentAnswerObj.studentAnswer : '';
 
@@ -602,8 +636,8 @@ router.get('/quiz/:quizId/results', verifyStudentToken, async (req, res) => {
       });
     }
 
-    // Get quiz details
-    const quiz = await Quiz.findById(quizId);
+    // Get quiz details (check RAM cache first)
+    const quiz = quizCache.get(quizId) || await Quiz.findById(quizId).lean();
 
     res.json({
       success: true,

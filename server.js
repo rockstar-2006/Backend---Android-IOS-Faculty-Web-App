@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 require('dotenv').config();
 const cookieParser = require('cookie-parser');
+const path = require('path');
 
 const authRoutes = require('./routes/auth');
 const quizRoutes = require('./routes/quiz');
@@ -12,9 +13,11 @@ const studentRoutes = require('./routes/student');
 const studentQuizRoutes = require('./routes/studentQuiz');
 const studentAuthRoutes = require('./routes/studentAuth');
 const studentAuthQuizRoutes = require('./routes/studentAuthQuiz');
+const adminRoutes = require('./routes/admin');
 const systemRoutes = require('./routes/system');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
 const { createIndexes } = require('./config/dbIndexes');
+const { seedAdminUser } = require('./config/adminSeeder');
 
 const app = express();
 
@@ -93,8 +96,9 @@ const connectDB = async () => {
     const rawUri = (process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/quiz_app').trim();
     const opts = {
       bufferCommands: false,
-      maxPoolSize: 100,      // Scale for 1000+ users
-      serverSelectionTimeoutMS: 15000,
+      maxPoolSize: 25,       // Optimization A: Keeps MongoDB Atlas M0 far below its 500 connection limit
+      minPoolSize: 5,
+      serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 45000,
       family: 4,             // IPv4 Preference for performance
     };
@@ -103,7 +107,8 @@ const connectDB = async () => {
     cachedConnection.promise = mongoose.connect(rawUri, opts).then((mongooseInstance) => {
       console.log('✅ Production Database Connected');
       lastDbError = null;
-      // Re-index on new connection
+      // Seed Super Admin & Indexes on connection
+      seedAdminUser().catch(e => console.error('Admin seed error:', e));
       createIndexes().catch(e => console.error('Index error:', e));
       return mongooseInstance;
     });
@@ -151,6 +156,9 @@ const ensureDb = async (req, res, next) => {
 /* =========================
    ROUTES
 ========================= */
+// Serve static landing page
+app.use('/landing', express.static(path.join(__dirname, '../landing-page')));
+
 app.use('/api', ensureDb); // Apply to all API routes
 
 app.use('/api/auth', authRoutes);
@@ -162,6 +170,7 @@ app.use('/api/student-quiz', studentQuizRoutes);
 
 app.use('/api/student', studentAuthRoutes);
 app.use('/api/student', studentAuthQuizRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/api/system', systemRoutes);
 
 // Fast Health Check

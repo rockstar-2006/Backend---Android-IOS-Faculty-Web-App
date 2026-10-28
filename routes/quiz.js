@@ -3,6 +3,7 @@ const Quiz = require('../models/Quiz');
 const Student = require('../models/Student');
 const { protect } = require('../middleware/auth');
 const emailService = require('../services/emailService');
+const quizCache = require('../utils/quizCache');
 const router = express.Router();
 
 // Get all quizzes with attempt statistics
@@ -253,7 +254,9 @@ router.put('/:id', protect, async (req, res) => {
       });
     }
 
-    console.log('✅ Quiz updated successfully');
+    // Invalidate RAM cache so updates are immediate
+    quizCache.del(req.params.id);
+    console.log('✅ Quiz updated successfully and cache invalidated');
 
     res.json({
       success: true,
@@ -283,6 +286,9 @@ router.delete('/:id', protect, async (req, res) => {
         message: 'Quiz not found'
       });
     }
+
+    // Invalidate RAM cache
+    quizCache.del(req.params.id);
 
     res.json({
       success: true,
@@ -362,6 +368,7 @@ router.post('/share', protect, async (req, res) => {
 
     // Save the updated quiz
     await quiz.save();
+    quizCache.del(quizId);
 
     console.log('✅ Quiz shared (Android) successfully. Shared:', shared.length, 'Failed:', failed.length);
 
@@ -495,6 +502,9 @@ router.get('/:id/results', protect, async (req, res) => {
       });
     }
 
+    // Invalidate RAM cache
+    quizCache.del(req.params.id);
+
     const attempts = await QuizAttempt.find({
       quizId: req.params.id,
       teacherId: req.user._id
@@ -535,6 +545,9 @@ router.get('/:id/results/download', protect, async (req, res) => {
         message: 'Quiz not found'
       });
     }
+
+    // Invalidate RAM cache
+    quizCache.del(req.params.id);
 
     const attempts = await QuizAttempt.find({
       quizId: req.params.id,
