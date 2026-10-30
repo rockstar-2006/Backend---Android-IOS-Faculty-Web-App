@@ -89,7 +89,8 @@ router.get('/attempt/:token', async (req, res) => {
             id: q.id,
             type: q.type,
             question: q.question,
-            options: q.options
+            options: q.options,
+            imageUrl: q.imageUrl || ''
             // Don't send answers or explanations
           }))
         },
@@ -151,7 +152,8 @@ router.get('/attempt/:token', async (req, res) => {
         usn: student.usn,
         branch: student.branch,
         year: student.year,
-        semester: student.semester
+        semester: student.semester,
+        section: student.section || ''
       } : null,
       hasStarted: false
     });
@@ -164,7 +166,7 @@ router.get('/attempt/:token', async (req, res) => {
 // Start quiz attempt (after student fills info)
 router.post('/attempt/start', async (req, res) => {
   try {
-    const { token, studentName, studentUSN, studentBranch, studentYear, studentSemester } = req.body;
+    const { token, studentName, studentUSN, studentBranch, studentYear, studentSemester, studentSection } = req.body;
 
     // Validate required fields
     if (!token || !studentName || !studentUSN || !studentBranch || !studentYear || !studentSemester) {
@@ -215,7 +217,8 @@ router.post('/attempt/start', async (req, res) => {
             id: q.id,
             type: q.type,
             question: q.question,
-            options: q.options
+            options: q.options,
+            imageUrl: q.imageUrl || ''
           }))
         }
       });
@@ -231,6 +234,7 @@ router.post('/attempt/start', async (req, res) => {
       studentBranch: studentBranch.trim(),
       studentYear: studentYear,
       studentSemester: studentSemester,
+      studentSection: (studentSection || '').trim().toUpperCase(),
       uniqueToken: token,
       status: 'started',
       maxMarks: quiz.questions.length

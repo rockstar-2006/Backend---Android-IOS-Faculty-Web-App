@@ -34,6 +34,11 @@ const questionSchema = new mongoose.Schema({
     type: String,
     enum: ['easy', 'medium', 'hard', 'mixed'],
     default: 'medium'
+  },
+  imageUrl: {
+    type: String,
+    trim: true,
+    default: ''
   }
 });
 

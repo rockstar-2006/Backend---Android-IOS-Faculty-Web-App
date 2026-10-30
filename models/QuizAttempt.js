@@ -13,7 +13,12 @@ const attemptAnswerSchema = new mongoose.Schema({
   correctAnswer: String,
   isCorrect: Boolean,
   marks: Number,
-  explanation: String
+  explanation: String,
+  imageUrl: {
+    type: String,
+    trim: true,
+    default: ''
+  }
 });
 
 const quizAttemptSchema = new mongoose.Schema({
@@ -56,6 +61,11 @@ const quizAttemptSchema = new mongoose.Schema({
   },
   studentSemester: {
     type: String
+  },
+  studentSection: {
+    type: String,
+    trim: true,
+    default: ''
   },
   answers: [attemptAnswerSchema],
   totalMarks: {

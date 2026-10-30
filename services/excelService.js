@@ -9,7 +9,7 @@ class ExcelService {
       ['Generated on:', new Date().toLocaleString()],
       ['Total Students:', attempts.length],
       [],
-      ['Name', 'USN', 'Email', 'Branch', 'Year', 'Semester', 'Total Marks', 'Max Marks', 'Percentage (%)', 'Status', 'Violation Reason', 'Submitted At']
+      ['Name', 'USN', 'Email', 'Branch', 'Year', 'Semester', 'Section', 'Total Marks', 'Max Marks', 'Percentage (%)', 'Status', 'Violation Reason', 'Submitted At']
     ];
 
     // Add student data
@@ -21,6 +21,7 @@ class ExcelService {
         attempt.studentBranch || 'N/A',
         attempt.studentYear || 'N/A',
         attempt.studentSemester || 'N/A',
+        attempt.studentSection || '',
         attempt.totalMarks || 0,
         attempt.maxMarks || 0,
         attempt.percentage || 0,
@@ -87,7 +88,7 @@ class ExcelService {
       ['Total Questions:', quiz?.questions?.length || 0],
       ['Total Students:', attempts.length],
       [],
-      ['Name', 'USN', 'Email', 'Branch', 'Year', 'Semester', 'Total Marks', 'Max Marks', 'Percentage (%)', 'Status', 'Violation Reason']
+      ['Name', 'USN', 'Email', 'Branch', 'Year', 'Semester', 'Section', 'Total Marks', 'Max Marks', 'Percentage (%)', 'Status', 'Violation Reason']
     ];
 
     attempts.forEach(attempt => {
@@ -98,6 +99,7 @@ class ExcelService {
         attempt.studentBranch || 'N/A',
         attempt.studentYear || 'N/A',
         attempt.studentSemester || 'N/A',
+        attempt.studentSection || '',
         attempt.totalMarks || 0,
         attempt.maxMarks || 0,
         attempt.percentage || 0,

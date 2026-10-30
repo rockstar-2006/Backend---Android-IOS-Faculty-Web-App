@@ -163,7 +163,8 @@ router.get('/quiz/:quizId', verifyStudentToken, async (req, res) => {
           type: q.type,
           options: q.options || [],
           marks: q.marks || 1,
-          difficulty: q.difficulty
+          difficulty: q.difficulty,
+          imageUrl: q.imageUrl || ''
         })),
         numQuestions: quiz.numQuestions,
         totalMarks: quiz.totalMarks,
@@ -309,6 +310,7 @@ router.post('/quiz/start', verifyStudentToken, async (req, res) => {
       studentBranch: student.branch || '',
       studentYear: student.year || '',
       studentSemester: student.semester || '',
+      studentSection: student.section || '',
       maxMarks: quiz.totalMarks,
       duration: quiz.duration || 30,
       status: 'started',
@@ -563,7 +565,8 @@ router.post('/quiz/submit', verifyStudentToken, async (req, res) => {
         correctAnswer: question.answer,
         isCorrect: grade.isCorrect,
         marks: grade.marks,
-        explanation: question.explanation || grade.feedback
+        explanation: question.explanation || grade.feedback,
+        imageUrl: question.imageUrl || ''
       });
     }
 
@@ -601,7 +604,8 @@ router.post('/quiz/submit', verifyStudentToken, async (req, res) => {
           studentAnswer: r.studentAnswer,
           correctAnswer: r.correctAnswer,
           explanation: r.explanation,
-          marks: r.marks
+          marks: r.marks,
+          imageUrl: r.imageUrl || ''
         }))
       }
     });

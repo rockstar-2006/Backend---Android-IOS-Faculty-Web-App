@@ -402,6 +402,8 @@ router.get('/quizzes', verifyStudentToken, async (req, res) => {
           attemptId: attempt?._id,
           score: attempt?.totalMarks,
           reason: attempt?.violationReason,
+          violationReason: attempt?.violationReason || '',
+          isBlocked: attempt?.status === 'blocked',
           percentage: attempt?.percentage,
           submittedAt: attempt?.submittedAt,
           result: attempt && (attempt.status === 'submitted' || attempt.status === 'graded') ? {

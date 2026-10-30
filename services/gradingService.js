@@ -29,7 +29,8 @@ class GradingService {
         options: question.options || [],
         studentAnswer: studentAnswer,
         correctAnswer: question.answer,
-        explanation: question.explanation || ''
+        explanation: question.explanation || '',
+        imageUrl: question.imageUrl || ''
       };
 
       if (question.type === 'mcq') {

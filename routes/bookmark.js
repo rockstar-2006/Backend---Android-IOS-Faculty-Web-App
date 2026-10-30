@@ -17,15 +17,37 @@ router.get('/', protect, async (req, res) => {
 });
 
 // Create bookmark
-router.post('/', protect, async (req, res) => {
+router.post('/', express.json({ limit: '50mb' }), protect, async (req, res) => {
   try {
+    const mongoose = require('mongoose');
+    const data = { ...req.body };
+    if (!data.folderId || !mongoose.Types.ObjectId.isValid(data.folderId)) {
+      delete data.folderId;
+    }
     const bookmark = await Bookmark.create({
-      ...req.body,
+      ...data,
       userId: req.user._id
     });
     res.status(201).json({ success: true, bookmark });
   } catch (error) {
     res.status(400).json({ message: error.message });
+  }
+});
+
+// Update bookmark
+router.put('/:id', express.json({ limit: '50mb' }), protect, async (req, res) => {
+  try {
+    const bookmark = await Bookmark.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user._id },
+      { $set: req.body },
+      { new: true }
+    );
+    if (!bookmark) {
+      return res.status(404).json({ success: false, message: 'Bookmark not found' });
+    }
+    res.json({ success: true, message: 'Bookmark updated successfully', bookmark });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
   }
 });
 

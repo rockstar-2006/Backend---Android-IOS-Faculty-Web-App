@@ -34,6 +34,11 @@ const studentAuthSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  section: {
+    type: String,
+    trim: true,
+    default: ''
+  },
   isVerified: {
     type: Boolean,
     default: false

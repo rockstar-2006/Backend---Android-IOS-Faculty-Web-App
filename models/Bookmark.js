@@ -4,8 +4,7 @@ const questionSchema = new mongoose.Schema({
   id: String,
   type: {
     type: String,
-    enum: ['mcq', 'short-answer', 'mixed'],
-    required: true
+    default: 'mcq'
   },
   question: {
     type: String,

@@ -72,7 +72,7 @@ router.get('/:id', protect, async (req, res) => {
 });
 
 // Save quiz
-router.post('/save', protect, async (req, res) => {
+router.post('/save', express.json({ limit: '50mb' }), express.urlencoded({ limit: '50mb', extended: true }), protect, async (req, res) => {
   try {
     console.log('📝 Saving quiz for user:', req.user.email);
 
@@ -135,7 +135,8 @@ router.post('/save', protect, async (req, res) => {
         explanation: q.explanation || '',
         marks: q.marks || 1,
         type: q.type || 'mcq',
-        difficulty: q.difficulty || 'medium'
+        difficulty: q.difficulty || 'medium',
+        imageUrl: q.imageUrl || ''
       });
     }
 
@@ -186,7 +187,7 @@ router.post('/save', protect, async (req, res) => {
 });
 
 // Update quiz
-router.put('/:id', protect, async (req, res) => {
+router.put('/:id', express.json({ limit: '50mb' }), express.urlencoded({ limit: '50mb', extended: true }), protect, async (req, res) => {
   try {
     console.log('🔄 Updating quiz:', req.params.id);
 
@@ -230,7 +231,8 @@ router.put('/:id', protect, async (req, res) => {
         explanation: q.explanation || '',
         marks: q.marks || 1,
         type: q.type || 'mcq',
-        difficulty: q.difficulty || 'medium'
+        difficulty: q.difficulty || 'medium',
+        imageUrl: q.imageUrl || ''
       }));
 
       // Calculate total marks
@@ -596,6 +598,10 @@ router.delete('/attempts/:id', protect, async (req, res) => {
       });
     }
 
+    if (attempt.quizId) {
+      quizCache.del(attempt.quizId.toString());
+    }
+
     res.json({
       success: true,
       message: 'Attempt deleted successfully'
@@ -604,6 +610,56 @@ router.delete('/attempts/:id', protect, async (req, res) => {
     res.status(400).json({
       success: false,
       message: error.message
+    });
+  }
+});
+
+// 🔄 Reset Quiz Attempt for a Student (Allow Retake / Reset Marks & Unblock)
+router.post('/:id/attempt/:attemptId/reset', protect, async (req, res) => {
+  try {
+    const QuizAttempt = require('../models/QuizAttempt');
+    const { id: quizId, attemptId } = req.params;
+
+    const quiz = await Quiz.findOne({
+      _id: quizId,
+      userId: req.user._id
+    });
+
+    if (!quiz) {
+      return res.status(404).json({
+        success: false,
+        message: 'Quiz not found or unauthorized'
+      });
+    }
+
+    // Find and delete the attempt so the student starts completely fresh
+    const attempt = await QuizAttempt.findOneAndDelete({
+      _id: attemptId,
+      quizId: quizId,
+      teacherId: req.user._id
+    });
+
+    if (!attempt) {
+      return res.status(404).json({
+        success: false,
+        message: 'Student attempt record not found'
+      });
+    }
+
+    // Invalidate quiz RAM cache so fresh start is immediate
+    quizCache.del(quizId);
+
+    console.log(`✅ Attempt ${attemptId} reset for student ${attempt.studentEmail} by teacher ${req.user.email}`);
+
+    res.json({
+      success: true,
+      message: `Attempt reset for ${attempt.studentName} (${attempt.studentUSN || attempt.studentEmail}). Marks cleared and quiz unlocked for retake.`
+    });
+  } catch (error) {
+    console.error('Error resetting quiz attempt:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to reset quiz attempt'
     });
   }
 });

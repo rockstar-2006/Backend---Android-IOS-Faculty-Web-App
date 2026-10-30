@@ -48,6 +48,7 @@ router.post('/upload', protect, async (req, res) => {
             branch: student.branch,
             year: student.year,
             semester: student.semester,
+            section: student.section || '',
             userId: req.user._id
           }
         },
@@ -68,7 +69,7 @@ router.post('/upload', protect, async (req, res) => {
 router.post('/add', protect, async (req, res) => {
   console.log('POST /add called with:', req.body);
   try {
-    const { name, usn, email, branch, year, semester } = req.body;
+    const { name, usn, email, branch, year, semester, section } = req.body;
 
     // Validate required fields
     if (!name || !usn || !email || !branch || !year || !semester) {
@@ -100,6 +101,7 @@ router.post('/add', protect, async (req, res) => {
       branch,
       year,
       semester,
+      section: section || '',
       userId: req.user._id
     });
 
@@ -117,7 +119,7 @@ router.post('/add', protect, async (req, res) => {
 router.put('/:id', protect, async (req, res) => {
   console.log('PUT /:id called for student:', req.params.id, 'data:', req.body);
   try {
-    const { name, usn, email, branch, year, semester } = req.body;
+    const { name, usn, email, branch, year, semester, section } = req.body;
 
     // Check if another student with same USN or email exists (excluding current student)
     const existingStudent = await Student.findOne({
@@ -138,7 +140,7 @@ router.put('/:id', protect, async (req, res) => {
 
     const student = await Student.findOneAndUpdate(
       { _id: req.params.id, userId: req.user._id },
-      { name, usn, email, branch, year, semester },
+      { name, usn, email, branch, year, semester, section: section || '' },
       { new: true, runValidators: true }
     );
 
